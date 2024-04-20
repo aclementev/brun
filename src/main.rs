@@ -1,8 +1,17 @@
+use clap::Parser;
 use std::{process::Command, time::Duration};
 
 use anyhow::Context;
 
 mod commit;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// The command to run on remote branch changes
+    #[arg(last = true, required = true)]
+    cmd: Vec<String>,
+}
 
 #[derive(Debug)]
 struct GithubState {
@@ -62,6 +71,10 @@ impl GithubState {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Parse the arguments
+    let args = Args::parse();
+    let user_cmd: String = args.cmd.join(" ");
+
     // Retrieve the token
     let token = std::env::var("GITHUB_TOKEN")
         .context("You must set the GITHUB_TOKEN environment variable")?;
@@ -74,8 +87,6 @@ fn main() -> anyhow::Result<()> {
     let repo = "test-repo";
     let branch = "new";
 
-    let command = "echo 'Ayo, waddup'";
-
     let mut state = GithubState::new(
         username.to_string(),
         repo.to_string(),
@@ -86,7 +97,8 @@ fn main() -> anyhow::Result<()> {
     let seconds = 5;
 
     // Prepare the command associated to the user
-    let cmd_parts = shellish_parse::parse(command, true).context("could not parse user command")?;
+    let cmd_parts =
+        shellish_parse::parse(&user_cmd, true).context("could not parse user command")?;
     let cmd_name = &cmd_parts[0];
     let cmd_args = &cmd_parts[1..];
 
