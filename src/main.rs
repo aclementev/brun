@@ -66,6 +66,10 @@ fn main() -> anyhow::Result<()> {
     let token = std::env::var("GITHUB_TOKEN")
         .context("You must set the GITHUB_TOKEN environment variable")?;
 
+    // TODO(alvaro): We can detect the current checked out branch
+    // We can also detect the user and repo from the git config
+    // But we should also allow for overriding this with flags or env 
+    // variables
     let username = "alvaroclementev";
     let repo = "test-repo";
     let branch = "new";
