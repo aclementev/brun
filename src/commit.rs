@@ -49,7 +49,7 @@ pub struct Ref {
 
 #[derive(Debug, Deserialize)]
 pub struct CommitResponse {
-    sha: String,
+    pub sha: String,
     node_id: String,
     commit: Commit,
     url: String,
