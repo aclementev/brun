@@ -69,6 +69,7 @@ dependencies = [
  "anyhow",
  "reqwest",
  "serde",
+ "shellish_parse",
 ]
 
 [[package]]
@@ -759,6 +760,12 @@ dependencies = [
  "ryu",
  "serde",
 ]
+
+[[package]]
+name = "shellish_parse"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c29b912ad681a28566f37b936bba1f3580a93b9391c4a0b12cb1c6b4ed79973"
 
 [[package]]
 name = "slab"

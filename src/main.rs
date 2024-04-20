@@ -68,11 +68,13 @@ fn main() -> anyhow::Result<()> {
 
     // TODO(alvaro): We can detect the current checked out branch
     // We can also detect the user and repo from the git config
-    // But we should also allow for overriding this with flags or env 
+    // But we should also allow for overriding this with flags or env
     // variables
     let username = "alvaroclementev";
     let repo = "test-repo";
     let branch = "new";
+
+    let command = "echo 'Ayo, waddup'";
 
     let mut state = GithubState::new(
         username.to_string(),
@@ -83,6 +85,11 @@ fn main() -> anyhow::Result<()> {
 
     let seconds = 5;
 
+    // Prepare the command associated to the user
+    let cmd_parts = shellish_parse::parse(command, true).context("could not parse user command")?;
+    let cmd_name = &cmd_parts[0];
+    let cmd_args = &cmd_parts[1..];
+
     // Refresh the state every N seconds
     loop {
         let previous = state.refresh()?;
@@ -90,18 +97,22 @@ fn main() -> anyhow::Result<()> {
         if previous.as_deref() != state.last_commit() {
             // Actually run the command
             println!("IT CHANGED!");
-            let status = Command::new("git")
+            Command::new("git")
                 .arg("pull")
                 .arg("--ff-only")
                 .status()
-                .expect("failed to execute git pull");
-
-            status
+                .context("failed to execute git pull")?
                 .code()
                 .map(|_| println!("Pulled the latest changes"))
-                .ok_or(anyhow::anyhow!("failed to pull"))?;
+                .ok_or(anyhow::anyhow!("pull returned error"))?;
 
-            // TODO(alvaro): Run here the specified command
+            // Run here the user command
+            Command::new(cmd_name)
+                .args(cmd_args)
+                .status()
+                .context("failed to execute user command")?
+                .code()
+                .ok_or(anyhow::anyhow!("user command returned error"))?;
         }
 
         // Sleep for some time
