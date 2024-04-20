@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{process::Command, time::Duration};
 
 use anyhow::Context;
 
@@ -35,7 +35,7 @@ impl GithubState {
     }
 
     pub fn last_commit(&self) -> Option<&str> {
-        self.last_commit.as_ref().map(AsRef::as_ref)
+        self.last_commit.as_deref()
     }
 
     fn refresh(&mut self) -> anyhow::Result<Option<String>> {
@@ -77,10 +77,30 @@ fn main() -> anyhow::Result<()> {
         token.to_string(),
     );
 
-    // Refresh the state every second
+    let seconds = 5;
+
+    // Refresh the state every N seconds
     loop {
-        state.refresh()?;
-        println!("The last commit was: {:?}", state.last_commit());
-        std::thread::sleep(Duration::from_secs(5));
+        let previous = state.refresh()?;
+        println!("The last commit is: {:?}", state.last_commit());
+        if previous.as_deref() != state.last_commit() {
+            // Actually run the command
+            println!("IT CHANGED!");
+            let status = Command::new("git")
+                .arg("pull")
+                .arg("--ff-only")
+                .status()
+                .expect("failed to execute git pull");
+
+            status
+                .code()
+                .map(|_| println!("Pulled the latest changes"))
+                .ok_or(anyhow::anyhow!("failed to pull"))?;
+
+            // TODO(alvaro): Run here the specified command
+        }
+
+        // Sleep for some time
+        std::thread::sleep(Duration::from_secs(seconds));
     }
 }
