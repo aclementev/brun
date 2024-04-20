@@ -14,4 +14,23 @@ any file changes in that branch, and will re-run `command` with the new changes.
 
 ## Installation
 
-**TODO**: Documentation
+To install it, clone the repo and run:
+
+```sh
+cargo install --path . 
+```
+
+This will build the CLI and install it in `$HOME/.cargo/bin`. You should make
+sure that you have that installed
+
+
+## Usage
+
+To run the command, you can just call it with: 
+
+```sh
+brun -- echo 'Something changed!'
+```
+
+This will listen for changes in the current checked out branch, pull the changes
+as they happen in the remote, and run the given command.
