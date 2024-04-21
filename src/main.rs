@@ -83,14 +83,14 @@ fn main() -> anyhow::Result<()> {
     // We can also detect the user and repo from the git config
     // But we should also allow for overriding this with flags or env
     // variables
-    let username = "alvaroclementev";
-    let repo = "test-repo";
-    let branch = "new";
+    let repo = RemoteRepo::try_from_gitconfig(None, None, None)?;
+
+    println!("Found RemoteRepo information: {:#?}", &repo);
 
     let mut state = GithubState::new(
-        username.to_string(),
-        repo.to_string(),
-        branch.to_string(),
+        repo.username.clone(),
+        repo.repo_name.clone(),
+        repo.branch.clone(),
         token.to_string(),
     );
 
@@ -130,4 +130,145 @@ fn main() -> anyhow::Result<()> {
         // Sleep for some time
         std::thread::sleep(Duration::from_secs(seconds));
     }
+}
+
+/// The information about the remote repository
+#[derive(Debug)]
+struct RemoteRepo {
+    /// The name of the account that owns the repository
+    pub username: String,
+    /// The name of the repository
+    pub repo_name: String,
+    /// The name of the branch to track
+    pub branch: String,
+}
+
+impl RemoteRepo {
+    /// Initialize a RemoteRepo based on the given values or by guessing from the
+    /// git configuration
+    fn try_from_gitconfig(
+        username: Option<String>,
+        repo_name: Option<String>,
+        branch: Option<String>,
+    ) -> anyhow::Result<Self> {
+        // Extract the branch name
+        let branch = if let Some(branch) = branch {
+            branch
+        } else {
+            git_head()?
+        };
+
+        // TODO(alvaro): We can skip this part if the user supplied the info
+        let (remote_username, remote_repo_name) = git_remote_info(&branch)?;
+
+        // Extract the username from the remote name
+        let username = username.unwrap_or(remote_username);
+        let repo_name = repo_name.unwrap_or(remote_repo_name);
+
+        Ok(Self {
+            username,
+            repo_name,
+            branch,
+        })
+    }
+}
+
+fn git_head() -> anyhow::Result<String> {
+    // TODO(alvaro): Make it work with an arbitrary branch
+    let output = Command::new("git")
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("HEAD")
+        .output()
+        .context("failed to execute git rev-parse HEAD")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to get upstream branch (code={}): {}",
+            &output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Get the remote username and repo_name from the git remote information
+fn git_remote_info(_branch: &str) -> anyhow::Result<(String, String)> {
+    // TODO(alvaro): Make it work with an arbitrary branch
+    let output = Command::new("git")
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("--symbolic-full-name")
+        .arg("@{upstream}")
+        .output()
+        .context("failed to execute git rev-parse <branch>")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to get upstream branch (code={}): {}",
+            &output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let remote = upstream.rsplit('/').nth(1).ok_or(anyhow::anyhow!(
+        "could not get remote name from upstream branch: {}",
+        upstream
+    ))?;
+
+    // TODO(alvaro): Make it work with an arbitrary branch
+    // Get the information from the remote
+    let output = Command::new("git")
+        .arg("remote")
+        .arg("get-url")
+        .arg(remote)
+        .output()
+        .context("failed to execute git remote get-url <remote>")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to get remote url (code={}): {}",
+            &output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    // Parse the URL
+    let (username, repo_name) = if url.starts_with("git@") {
+        // It's an SSH URL
+        let repo_uri = url.rsplit(':').next().ok_or(anyhow::anyhow!(
+            "failed to get the repo_uri from the remote url: {}",
+            url
+        ))?;
+        repo_uri
+            .split_once('/')
+            .expect("the repo uri to have a slash")
+    } else {
+        // It's an HTTP(s) URL
+        assert!(url.starts_with("http"));
+
+        let mut uri_parts = url.split('/');
+        let repo_name = uri_parts
+            .next()
+            .expect("split to return at least one result");
+        let username = uri_parts.next().ok_or(anyhow::anyhow!(
+            "the URI to have at least one slash: {}",
+            url
+        ))?;
+
+        (username, repo_name)
+    };
+
+    // Trim the `.git` suffix, it it's there
+    let repo_name = if repo_name.ends_with(".git") {
+        repo_name.strip_suffix(".git").unwrap()
+    } else {
+        repo_name
+    };
+
+    Ok((username.to_string(), repo_name.to_string()))
 }
