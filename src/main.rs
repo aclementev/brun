@@ -89,6 +89,11 @@ fn main() -> anyhow::Result<()> {
             anyhow::anyhow!("You must set the GH_TOKEN or GITHUB_TOKEN environment variable")
         })?;
 
+    // Check if there are in a git repository work tree
+    if !git::git_is_work_tree()? {
+        anyhow::bail!("you are not in a git repository");
+    }
+
     // TODO(alvaro): We can detect the current checked out branch
     // We can also detect the user and repo from the git config
     // But we should also allow for overriding this with flags or env
@@ -96,7 +101,7 @@ fn main() -> anyhow::Result<()> {
     let repo = RemoteRepo::try_from_gitconfig()?;
 
     // Check if there are some unstashed changes
-    if git::git_unstashed_changes()? {
+    if git::git_has_unstashed_changes()? {
         anyhow::bail!("there are uncommitted changes. Run `git commit` or `git stash` to save the changes, and try again.");
     }
 

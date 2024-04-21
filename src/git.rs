@@ -23,13 +23,12 @@ pub(crate) fn git_head() -> anyhow::Result<String> {
 }
 
 /// Get the remote username and repo_name from the git remote information
-pub(crate) fn git_upstream_info(_branch: &str) -> anyhow::Result<(String, String)> {
-    // TODO(alvaro): Make it work with an arbitrary branch
+pub(crate) fn git_upstream_info(branch: &str) -> anyhow::Result<(String, String)> {
     let output = Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")
         .arg("--symbolic-full-name")
-        .arg("@{upstream}")
+        .arg(format!("{}@{{upstream}}", branch))
         .output()
         .context("failed to execute git rev-parse <branch>")?;
 
@@ -47,7 +46,6 @@ pub(crate) fn git_upstream_info(_branch: &str) -> anyhow::Result<(String, String
         upstream
     ))?;
 
-    // TODO(alvaro): Make it work with an arbitrary branch
     // Get the information from the remote
     let output = Command::new("git")
         .arg("remote")
@@ -103,8 +101,7 @@ pub(crate) fn git_upstream_info(_branch: &str) -> anyhow::Result<(String, String
 }
 
 /// Check if a repository has unstashed changes, which would avoid pulling
-pub(crate) fn git_unstashed_changes() -> anyhow::Result<bool> {
-    // TODO(alvaro): Make it work with an arbitrary branch
+pub(crate) fn git_has_unstashed_changes() -> anyhow::Result<bool> {
     Command::new("git")
         .arg("diff")
         .arg("--quiet")
@@ -113,4 +110,16 @@ pub(crate) fn git_unstashed_changes() -> anyhow::Result<bool> {
         .code()
         .ok_or(anyhow::anyhow!("git diff exited unsuccessfully"))
         .map(|c| c != 0)
+}
+
+/// Check if we are in a git repository work tree (not `.git`)
+pub(crate) fn git_is_work_tree() -> anyhow::Result<bool> {
+    Command::new("git")
+        .arg("rev-parse")
+        .arg("--is-inside-work-tree")
+        .status()
+        .context("failed to execute git rev-parse --is-inside-work-tree")?
+        .code()
+        .ok_or(anyhow::anyhow!("git rev-parse exited unsuccessfully"))
+        .map(|c| c == 0)
 }
