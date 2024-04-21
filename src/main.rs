@@ -82,46 +82,18 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let user_cmd: String = args.cmd.join(" ");
 
-    // Retrieve the token
-    let token = std::env::var("GH_TOKEN")
-        .or_else(|_| std::env::var("GITHUB_TOKEN"))
-        .map_err(|_| {
-            anyhow::anyhow!("You must set the GH_TOKEN or GITHUB_TOKEN environment variable")
-        })?;
-
-    // Check if there are in a git repository work tree
-    if !git::git_is_work_tree()? {
-        anyhow::bail!("you are not in a git repository");
-    }
-
-    // TODO(alvaro): We can detect the current checked out branch
-    // We can also detect the user and repo from the git config
-    // But we should also allow for overriding this with flags or env
-    // variables
-    let repo = RemoteRepo::try_from_gitconfig()?;
-
-    // Check if there are some unstashed changes
-    if git::git_has_unstashed_changes()? {
-        anyhow::bail!("there are uncommitted changes. Run `git commit` or `git stash` to save the changes, and try again.");
-    }
-
-    println!(
-        "Listening for changes from {}/{}/{}",
-        &repo.username, &repo.repo_name, &repo.branch
-    );
-
-    let mut state = GithubState::new(
-        repo.username.clone(),
-        repo.repo_name.clone(),
-        repo.branch.clone(),
-        token.to_string(),
-    );
-
     // Prepare the command associated to the user
     let cmd_parts =
         shellish_parse::parse(&user_cmd, true).context("could not parse user command")?;
     let cmd_name = &cmd_parts[0];
     let cmd_args = &cmd_parts[1..];
+
+    let mut state = setup()?;
+
+    println!(
+        "Listening for changes from {}/{}/{}",
+        &state.username, &state.repo, &state.branch
+    );
 
     // Refresh the state every N seconds
     loop {
@@ -151,6 +123,39 @@ fn main() -> anyhow::Result<()> {
         // Sleep for some time
         std::thread::sleep(Duration::from_secs_f64(args.period));
     }
+}
+
+/// Analyze the executing environment and collect the state
+fn setup() -> anyhow::Result<GithubState> {
+    // Retrieve the token
+    let token = std::env::var("GH_TOKEN")
+        .or_else(|_| std::env::var("GITHUB_TOKEN"))
+        .map_err(|_| {
+            anyhow::anyhow!("You must set the GH_TOKEN or GITHUB_TOKEN environment variable")
+        })?;
+
+    // Check if there are in a git repository work tree
+    if !git::git_is_work_tree()? {
+        anyhow::bail!("you are not in a git repository");
+    }
+
+    // TODO(alvaro): We can detect the current checked out branch
+    // We can also detect the user and repo from the git config
+    // But we should also allow for overriding this with flags or env
+    // variables
+    let repo = RemoteRepo::try_from_gitconfig()?;
+
+    // Check if there are some unstashed changes
+    if git::git_has_unstashed_changes()? {
+        anyhow::bail!("there are uncommitted changes. Run `git commit` or `git stash` to save the changes, and try again.");
+    }
+
+    Ok(GithubState::new(
+        repo.username.clone(),
+        repo.repo_name.clone(),
+        repo.branch.clone(),
+        token.to_string(),
+    ))
 }
 
 /// The information about the remote repository
