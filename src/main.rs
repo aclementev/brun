@@ -19,7 +19,7 @@ struct Args {
     #[arg(long)]
     stop_on_failure: bool,
 
-    /// The command to run on upstream changes
+    /// The command to run on upstream changes. NOTE: this is run in a subshell
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
 }
@@ -87,12 +87,6 @@ fn main() -> anyhow::Result<()> {
     let user_cmd: String = args.cmd.join(" ");
     let stop_on_failure = args.stop_on_failure;
 
-    // Prepare the command associated to the user
-    let cmd_parts =
-        shellish_parse::parse(&user_cmd, true).context("could not parse user command")?;
-    let cmd_name = &cmd_parts[0];
-    let cmd_args = &cmd_parts[1..];
-
     let mut state = setup()?;
 
     println!(
@@ -129,8 +123,9 @@ fn main() -> anyhow::Result<()> {
                 .ok_or(anyhow::anyhow!("pull returned error"))?;
 
             // Run here the user command
-            let code = Command::new(cmd_name)
-                .args(cmd_args)
+            let code = Command::new("sh")
+                .arg("-c")
+                .arg(&user_cmd)
                 .status()
                 .context("failed to execute user command")?
                 .code()
