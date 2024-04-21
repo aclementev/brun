@@ -76,14 +76,17 @@ fn main() -> anyhow::Result<()> {
     let user_cmd: String = args.cmd.join(" ");
 
     // Retrieve the token
-    let token = std::env::var("GITHUB_TOKEN")
-        .context("You must set the GITHUB_TOKEN environment variable")?;
+    let token = std::env::var("GH_TOKEN")
+        .or_else(|_| std::env::var("GITHUB_TOKEN"))
+        .map_err(|_| {
+            anyhow::anyhow!("You must set the GH_TOKEN or GITHUB_TOKEN environment variable")
+        })?;
 
     // TODO(alvaro): We can detect the current checked out branch
     // We can also detect the user and repo from the git config
     // But we should also allow for overriding this with flags or env
     // variables
-    let repo = RemoteRepo::try_from_gitconfig(None, None, None)?;
+    let repo = RemoteRepo::try_from_gitconfig()?;
 
     println!("Found RemoteRepo information: {:#?}", &repo);
 
@@ -146,24 +149,11 @@ struct RemoteRepo {
 impl RemoteRepo {
     /// Initialize a RemoteRepo based on the given values or by guessing from the
     /// git configuration
-    fn try_from_gitconfig(
-        username: Option<String>,
-        repo_name: Option<String>,
-        branch: Option<String>,
-    ) -> anyhow::Result<Self> {
+    fn try_from_gitconfig() -> anyhow::Result<Self> {
         // Extract the branch name
-        let branch = if let Some(branch) = branch {
-            branch
-        } else {
-            git_head()?
-        };
-
-        // TODO(alvaro): We can skip this part if the user supplied the info
-        let (remote_username, remote_repo_name) = git_remote_info(&branch)?;
-
-        // Extract the username from the remote name
-        let username = username.unwrap_or(remote_username);
-        let repo_name = repo_name.unwrap_or(remote_repo_name);
+        let branch = git_head()?;
+        // Extract the information from the upstream remote
+        let (username, repo_name) = git_upstream_info(&branch)?;
 
         Ok(Self {
             username,
@@ -194,7 +184,7 @@ fn git_head() -> anyhow::Result<String> {
 }
 
 /// Get the remote username and repo_name from the git remote information
-fn git_remote_info(_branch: &str) -> anyhow::Result<(String, String)> {
+fn git_upstream_info(_branch: &str) -> anyhow::Result<(String, String)> {
     // TODO(alvaro): Make it work with an arbitrary branch
     let output = Command::new("git")
         .arg("rev-parse")
