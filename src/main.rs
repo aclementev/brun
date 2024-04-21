@@ -15,6 +15,10 @@ struct Args {
     #[arg(default_value = "5", long, short)]
     period: f64,
 
+    /// If enabled, brun will stop pulling new changes if `cmd` returns an error
+    #[arg(long)]
+    stop_on_failure: bool,
+
     /// The command to run on upstream changes
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
@@ -81,6 +85,7 @@ fn main() -> anyhow::Result<()> {
     // Parse the arguments
     let args = Args::parse();
     let user_cmd: String = args.cmd.join(" ");
+    let stop_on_failure = args.stop_on_failure;
 
     // Prepare the command associated to the user
     let cmd_parts =
@@ -98,10 +103,22 @@ fn main() -> anyhow::Result<()> {
     // Refresh the state every N seconds
     loop {
         let previous = state.refresh()?;
-        println!("The last commit is: {:?}", state.last_commit());
+        println!(
+            "The last commit is: {}",
+            state.last_commit().unwrap_or("null")
+        );
         if previous.as_deref() != state.last_commit() {
+            // There was a change in the remote
+            println!(
+                "Remote branch changed: {} -> {}",
+                previous.as_deref().unwrap_or("null"),
+                state.last_commit().unwrap_or("null")
+            );
+
             // Actually run the command
-            println!("IT CHANGED!");
+            // TODO(alvaro): What do we want to do if we failed to pull
+            // the changes? should we stop by default?
+            // Pull the latest changes
             Command::new("git")
                 .arg("pull")
                 .arg("--ff-only")
@@ -112,12 +129,16 @@ fn main() -> anyhow::Result<()> {
                 .ok_or(anyhow::anyhow!("pull returned error"))?;
 
             // Run here the user command
-            Command::new(cmd_name)
+            let code = Command::new(cmd_name)
                 .args(cmd_args)
                 .status()
                 .context("failed to execute user command")?
                 .code()
                 .ok_or(anyhow::anyhow!("user command returned error"))?;
+
+            if code != 0 && stop_on_failure {
+                anyhow::bail!("user command returned non-zero status code: {}", code);
+            }
         }
 
         // Sleep for some time
@@ -162,11 +183,11 @@ fn setup() -> anyhow::Result<GithubState> {
 #[derive(Debug)]
 struct RemoteRepo {
     /// The name of the account that owns the repository
-    pub username: String,
+    username: String,
     /// The name of the repository
-    pub repo_name: String,
+    repo_name: String,
     /// The name of the branch to track
-    pub branch: String,
+    branch: String,
 }
 
 impl RemoteRepo {
