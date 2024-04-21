@@ -5,10 +5,16 @@ use anyhow::Context;
 
 mod commit;
 
+/// Listen for changes on the upstream for the currently checked out branch,
+/// and when a change is found, pull them and run the given command
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// The command to run on remote branch changes
+    /// The polling period for checking for upstream changes (in seconds)
+    #[arg(default_value = "5", long, short)]
+    period: f64,
+
+    /// The command to run on upstream changes
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
 }
@@ -88,7 +94,10 @@ fn main() -> anyhow::Result<()> {
     // variables
     let repo = RemoteRepo::try_from_gitconfig()?;
 
-    println!("Found RemoteRepo information: {:#?}", &repo);
+    println!(
+        "Listening for changes from {}/{}/{}",
+        &repo.username, &repo.repo_name, &repo.branch
+    );
 
     let mut state = GithubState::new(
         repo.username.clone(),
@@ -96,8 +105,6 @@ fn main() -> anyhow::Result<()> {
         repo.branch.clone(),
         token.to_string(),
     );
-
-    let seconds = 5;
 
     // Prepare the command associated to the user
     let cmd_parts =
@@ -131,7 +138,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Sleep for some time
-        std::thread::sleep(Duration::from_secs(seconds));
+        std::thread::sleep(Duration::from_secs_f64(args.period));
     }
 }
 
