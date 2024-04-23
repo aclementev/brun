@@ -1,50 +1,49 @@
-use anyhow::Context;
 use std::process::Command;
 
+use crate::error::{Error, Result};
+
 /// Helpers to work with a git repository
-pub(crate) fn git_head() -> anyhow::Result<String> {
+pub(crate) fn git_head() -> Result<String> {
     // TODO(alvaro): Make it work with an arbitrary branch
     let output = Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")
         .arg("HEAD")
         .output()
-        .context("failed to execute git rev-parse HEAD")?;
+        .map_err(|_| Error::CommandFailure("git rev-parse HEAD".to_string()))?;
 
     if !output.status.success() {
-        anyhow::bail!(
-            "failed to get upstream branch (code={}): {}",
-            &output.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        return Err(Error::GitNoHead(
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Get the remote username and repo_name from the git remote information
-pub(crate) fn git_upstream_info(branch: &str) -> anyhow::Result<(String, String)> {
+pub(crate) fn git_upstream_info(branch: &str) -> Result<(String, String)> {
     let output = Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")
         .arg("--symbolic-full-name")
         .arg(format!("{}@{{upstream}}", branch))
         .output()
-        .context("failed to execute git rev-parse <branch>")?;
+        .map_err(|_| Error::CommandFailure("git diff".to_string()))?;
 
     if !output.status.success() {
-        anyhow::bail!(
-            "failed to get upstream branch (code={}): {}",
-            &output.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        return Err(Error::GitNoUpstream(
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
     }
 
     let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let remote = upstream.rsplit('/').nth(1).ok_or(anyhow::anyhow!(
-        "could not get remote name from upstream branch: {}",
-        upstream
-    ))?;
+    let remote = upstream
+        .rsplit('/')
+        .nth(1)
+        .ok_or(Error::GitBadRemote(upstream.clone()))?;
 
     // Get the information from the remote
     let output = Command::new("git")
@@ -52,14 +51,13 @@ pub(crate) fn git_upstream_info(branch: &str) -> anyhow::Result<(String, String)
         .arg("get-url")
         .arg(remote)
         .output()
-        .context("failed to execute git remote get-url <remote>")?;
+        .map_err(|_| Error::CommandFailure("git remote get-url <remote>".to_string()))?;
 
     if !output.status.success() {
-        anyhow::bail!(
-            "failed to get remote url (code={}): {}",
-            &output.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        return Err(Error::GitNoUpstreamURL(
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
     }
 
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -67,10 +65,7 @@ pub(crate) fn git_upstream_info(branch: &str) -> anyhow::Result<(String, String)
     // Parse the URL
     let (username, repo_name) = if url.starts_with("git@") {
         // It's an SSH URL
-        let repo_uri = url.rsplit(':').next().ok_or(anyhow::anyhow!(
-            "failed to get the repo_uri from the remote url: {}",
-            url
-        ))?;
+        let repo_uri = url.rsplit(':').next().ok_or(Error::GitBadRemote(url.clone()))?;
         repo_uri
             .split_once('/')
             .expect("the repo uri to have a slash")
@@ -82,10 +77,10 @@ pub(crate) fn git_upstream_info(branch: &str) -> anyhow::Result<(String, String)
         let repo_name = uri_parts
             .next()
             .expect("split to return at least one result");
-        let username = uri_parts.next().ok_or(anyhow::anyhow!(
+        let username = uri_parts.next().ok_or(Error::InternalError(format!(
             "the URI to have at least one slash: {}",
             url
-        ))?;
+        )))?;
 
         (username, repo_name)
     };
@@ -101,25 +96,25 @@ pub(crate) fn git_upstream_info(branch: &str) -> anyhow::Result<(String, String)
 }
 
 /// Check if a repository has unstashed changes, which would avoid pulling
-pub(crate) fn git_has_unstashed_changes() -> anyhow::Result<bool> {
+pub(crate) fn git_has_unstashed_changes() -> Result<bool> {
     Command::new("git")
         .arg("diff")
         .arg("--quiet")
         .status()
-        .context("failed to execute git diff")?
+        .map_err(|_| Error::CommandFailure("git diff".to_string()))?
         .code()
-        .ok_or(anyhow::anyhow!("git diff exited unsuccessfully"))
+        .ok_or_else(|| Error::CommandSignaled("git diff".to_string()))
         .map(|c| c != 0)
 }
 
 /// Check if we are in a git repository work tree (not `.git`)
-pub(crate) fn git_is_work_tree() -> anyhow::Result<bool> {
+pub(crate) fn git_is_work_tree() -> Result<bool> {
     Command::new("git")
         .arg("rev-parse")
         .arg("--is-inside-work-tree")
         .status()
-        .context("failed to execute git rev-parse --is-inside-work-tree")?
+        .map_err(|_| Error::CommandFailure("git rev-parse --is-inside-work-tree".to_string()))?
         .code()
-        .ok_or(anyhow::anyhow!("git rev-parse exited unsuccessfully"))
+        .ok_or_else(|| Error::CommandSignaled("git rev-parse --is-inside-work-tree".to_string()))
         .map(|c| c == 0)
 }

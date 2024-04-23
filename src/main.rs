@@ -1,10 +1,12 @@
-use clap::Parser;
+mod commit;
+mod error;
+mod git;
+
 use std::{process::Command, time::Duration};
 
-use anyhow::Context;
+use clap::Parser;
 
-mod commit;
-mod git;
+use error::{Error, Result};
 
 /// Listen for changes on the upstream for the currently checked out branch,
 /// and when a change is found, pull them and run the given command
@@ -58,7 +60,7 @@ impl GithubState {
         self.last_commit.as_deref()
     }
 
-    fn refresh(&mut self) -> anyhow::Result<Option<String>> {
+    fn refresh(&mut self) -> Result<Option<String>> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=1",
             self.username, self.repo, self.branch
@@ -73,20 +75,26 @@ impl GithubState {
             .error_for_status()?;
 
         let commits: Vec<commit::CommitResponse> = body.json()?;
-        let commit = commits
-            .into_iter()
-            .next()
-            .ok_or(anyhow::anyhow!("No commits found"))?;
+        let commit = commits.into_iter().next().ok_or(Error::GitEmptyHistory)?;
         Ok(self.last_commit.replace(commit.sha))
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     // Parse the arguments
     let args = Args::parse();
     let user_cmd: String = args.cmd.join(" ");
-    let stop_on_failure = args.stop_on_failure;
 
+    match listen_and_run(user_cmd, args.stop_on_failure, args.period) {
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("error: {}", error);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Result<()> {
     let mut state = setup()?;
 
     println!(
@@ -117,42 +125,41 @@ fn main() -> anyhow::Result<()> {
                 .arg("pull")
                 .arg("--ff-only")
                 .status()
-                .context("failed to execute git pull")?
+                .map_err(|_| Error::CommandFailure("git pull".to_string()))?
                 .code()
                 .map(|_| println!("Pulled the latest changes"))
-                .ok_or(anyhow::anyhow!("pull returned error"))?;
+                .ok_or(Error::CommandSignaled("git pull".to_string()))?;
 
             // Run here the user command
-            let code = Command::new("sh")
+            let output = Command::new("sh")
                 .arg("-c")
                 .arg(&user_cmd)
-                .status()
-                .context("failed to execute user command")?
-                .code()
-                .ok_or(anyhow::anyhow!("user command returned error"))?;
+                .output()
+                .map_err(|_| Error::CommandFailure(user_cmd.clone()))?;
 
-            if code != 0 && stop_on_failure {
-                anyhow::bail!("user command returned non-zero status code: {}", code);
+            if !output.status.success() && stop_on_failure {
+                return Err(Error::UserCommand(
+                    output.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&output.stderr).to_string(),
+                ));
             }
         }
 
         // Sleep for some time
-        std::thread::sleep(Duration::from_secs_f64(args.period));
+        std::thread::sleep(Duration::from_secs_f64(period));
     }
 }
 
 /// Analyze the executing environment and collect the state
-fn setup() -> anyhow::Result<GithubState> {
+fn setup() -> Result<GithubState> {
     // Retrieve the token
     let token = std::env::var("GH_TOKEN")
         .or_else(|_| std::env::var("GITHUB_TOKEN"))
-        .map_err(|_| {
-            anyhow::anyhow!("You must set the GH_TOKEN or GITHUB_TOKEN environment variable")
-        })?;
+        .map_err(|_| Error::MissingToken)?;
 
     // Check if there are in a git repository work tree
     if !git::git_is_work_tree()? {
-        anyhow::bail!("you are not in a git repository");
+        return Err(Error::GitNotinWorkTree);
     }
 
     // TODO(alvaro): We can detect the current checked out branch
@@ -163,7 +170,7 @@ fn setup() -> anyhow::Result<GithubState> {
 
     // Check if there are some unstashed changes
     if git::git_has_unstashed_changes()? {
-        anyhow::bail!("there are uncommitted changes. Run `git commit` or `git stash` to save the changes, and try again.");
+        return Err(Error::GitDirty);
     }
 
     Ok(GithubState::new(
@@ -188,7 +195,7 @@ struct RemoteRepo {
 impl RemoteRepo {
     /// Initialize a RemoteRepo based on the given values or by guessing from the
     /// git configuration
-    fn try_from_gitconfig() -> anyhow::Result<Self> {
+    fn try_from_gitconfig() -> Result<Self> {
         // Extract the branch name
         let branch = git::git_head()?;
         // Extract the information from the upstream remote
