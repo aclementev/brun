@@ -3,6 +3,7 @@ mod error;
 mod git;
 
 use log::{debug, trace};
+use std::io::{self, Write};
 use std::{process::Command, time::Duration};
 
 use clap::Parser;
@@ -146,7 +147,8 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
                 .map_err(|_| Error::CommandFailure(user_cmd.clone()))?;
 
             // Show the output of the user command
-            println!("{}", String::from_utf8_lossy(&output.stdout));
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            io::stdout().flush()?;
 
             if !output.status.success() && stop_on_failure {
                 return Err(Error::UserCommand(
