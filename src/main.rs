@@ -2,6 +2,7 @@ mod commit;
 mod error;
 mod git;
 
+use log::{debug, trace};
 use std::{process::Command, time::Duration};
 
 use clap::Parser;
@@ -65,6 +66,7 @@ impl GithubState {
             "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=1",
             self.username, self.repo, self.branch
         );
+        trace!("request url={}", &url);
         let body = self
             .client
             .get(url)
@@ -81,9 +83,13 @@ impl GithubState {
 }
 
 fn main() {
+    // Initialize the logger
+    env_logger::init();
+
     // Parse the arguments
     let args = Args::parse();
     let user_cmd: String = args.cmd.join(" ");
+    debug!("running with user command: {}", &user_cmd);
 
     match listen_and_run(user_cmd, args.stop_on_failure, args.period) {
         Ok(_) => {}
@@ -104,6 +110,7 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
 
     // Refresh the state every N seconds
     loop {
+        debug!("refreshing git state");
         let previous = state.refresh()?;
         println!(
             "The last commit is: {}",
@@ -117,9 +124,8 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
                 state.last_commit().unwrap_or("null")
             );
 
-            // Actually run the command
-            // TODO(alvaro): What do we want to do if we failed to pull
-            // the changes? should we stop by default?
+            debug!("running git pull");
+
             // Pull the latest changes
             Command::new("git")
                 .arg("pull")
@@ -131,6 +137,7 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
                 .map(|_| println!("Pulled the latest changes"))
                 .ok_or(Error::CommandSignaled("git pull".to_string()))?;
 
+            debug!("running user command");
             // Run here the user command
             let output = Command::new("sh")
                 .arg("-c")
@@ -149,6 +156,7 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
             }
         }
 
+        trace!("sleeping for {}", period);
         // Sleep for some time
         std::thread::sleep(Duration::from_secs_f64(period));
     }
@@ -202,8 +210,10 @@ impl RemoteRepo {
     fn try_from_gitconfig() -> Result<Self> {
         // Extract the branch name
         let branch = git::git_head()?;
+        debug!("found branch={}", &branch);
         // Extract the information from the upstream remote
         let (username, repo_name) = git::git_upstream_info(&branch)?;
+        debug!("found username={} repo_name={}", &username, &repo_name);
 
         Ok(Self {
             username,

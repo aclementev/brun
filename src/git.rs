@@ -1,6 +1,7 @@
 use std::process::Command;
 
 use crate::error::{Error, Result};
+use log::trace;
 
 /// Helpers to work with a git repository
 pub(crate) fn git_head() -> Result<String> {
@@ -40,10 +41,15 @@ pub(crate) fn git_upstream_info(branch: &str) -> Result<(String, String)> {
     }
 
     let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    trace!("found upstream={}", &upstream);
+
+    // FIXME(alvaro): This fails with branches that have `/` in them
     let remote = upstream
         .rsplit('/')
         .nth(1)
         .ok_or(Error::GitBadRemote(upstream.clone()))?;
+
+    trace!("found upstream remote={}", &remote);
 
     // Get the information from the remote
     let output = Command::new("git")
@@ -61,6 +67,8 @@ pub(crate) fn git_upstream_info(branch: &str) -> Result<(String, String)> {
     }
 
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    trace!("found upstream remote url={}", &url);
 
     // Parse the URL
     let (username, repo_name) = if url.starts_with("git@") {
@@ -90,6 +98,7 @@ pub(crate) fn git_upstream_info(branch: &str) -> Result<(String, String)> {
 
     // Trim the `.git` suffix, it it's there
     let repo_name = if repo_name.ends_with(".git") {
+        trace!("repo name has .git suffix={}", &repo_name);
         repo_name.strip_suffix(".git").unwrap()
     } else {
         repo_name
