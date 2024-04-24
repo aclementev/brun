@@ -1,6 +1,7 @@
 mod commit;
 mod error;
 mod git;
+mod remote;
 
 use log::{debug, trace};
 use std::io::{self, Write};
@@ -9,6 +10,7 @@ use std::{process::Command, time::Duration};
 use clap::Parser;
 
 use error::{Error, Result};
+use remote::{github, Remote};
 
 /// Listen for changes on the upstream for the currently checked out branch,
 /// and when a change is found, pull them and run the given command
@@ -26,61 +28,6 @@ struct Args {
     /// The command to run on upstream changes. NOTE: this is run in a subshell
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
-}
-
-#[derive(Debug)]
-struct GithubState {
-    username: String,
-    repo: String,
-    branch: String,
-    token: String,
-    client: reqwest::blocking::Client,
-    last_commit: Option<String>,
-}
-
-impl GithubState {
-    fn new(username: String, repo: String, branch: String, token: String) -> Self {
-        // NOTE(alvaro): Github apparently is blocking based on user agent (maybe
-        // the problem is a missing user agent?)
-        let curl_ua = "curl/7.68.0";
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(curl_ua)
-            .build()
-            .expect("the client to build");
-
-        Self {
-            username,
-            repo,
-            branch,
-            token,
-            client,
-            last_commit: None,
-        }
-    }
-
-    pub fn last_commit(&self) -> Option<&str> {
-        self.last_commit.as_deref()
-    }
-
-    fn refresh(&mut self) -> Result<Option<String>> {
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=1",
-            self.username, self.repo, self.branch
-        );
-        trace!("request url={}", &url);
-        let body = self
-            .client
-            .get(url)
-            .bearer_auth(&self.token)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()?
-            .error_for_status()?;
-
-        let commits: Vec<commit::CommitResponse> = body.json()?;
-        let commit = commits.into_iter().next().ok_or(Error::GitEmptyHistory)?;
-        Ok(self.last_commit.replace(commit.sha))
-    }
 }
 
 fn main() {
@@ -102,27 +49,27 @@ fn main() {
 }
 
 fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Result<()> {
-    let mut state = setup()?;
+    let mut remote: github::Github = setup()?;
 
     println!(
         "Listening for changes from {}/{}/{}",
-        &state.username, &state.repo, &state.branch
+        &remote.username, &remote.repo, &remote.branch
     );
 
     // Refresh the state every N seconds
     loop {
-        debug!("refreshing git state");
-        let previous = state.refresh()?;
+        debug!("refreshing git remote state");
+        let previous = remote.refresh()?;
         println!(
             "The last commit is: {}",
-            state.last_commit().unwrap_or("null")
+            remote.last_commit().unwrap_or("null")
         );
-        if previous.as_deref() != state.last_commit() {
+        if previous.as_deref() != remote.last_commit() {
             // There was a change in the remote
             println!(
                 "Remote branch changed: {} -> {}",
                 previous.as_deref().unwrap_or("null"),
-                state.last_commit().unwrap_or("null")
+                remote.last_commit().unwrap_or("null")
             );
 
             debug!("running git pull");
@@ -165,7 +112,7 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
 }
 
 /// Analyze the executing environment and collect the state
-fn setup() -> Result<GithubState> {
+fn setup<T: Remote>() -> Result<T> {
     // Retrieve the token
     let token = std::env::var("GH_TOKEN")
         .or_else(|_| std::env::var("GITHUB_TOKEN"))
@@ -187,12 +134,15 @@ fn setup() -> Result<GithubState> {
         return Err(Error::GitDirty);
     }
 
-    Ok(GithubState::new(
+    // Create the remote
+    let remote = T::new(
         repo.username.clone(),
         repo.repo_name.clone(),
         repo.branch.clone(),
         token.to_string(),
-    ))
+    );
+
+    Ok(remote)
 }
 
 /// The information about the remote repository
