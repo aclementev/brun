@@ -124,8 +124,9 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
             Command::new("git")
                 .arg("pull")
                 .arg("--ff-only")
-                .status()
+                .output()
                 .map_err(|_| Error::CommandFailure("git pull".to_string()))?
+                .status
                 .code()
                 .map(|_| println!("Pulled the latest changes"))
                 .ok_or(Error::CommandSignaled("git pull".to_string()))?;
@@ -136,6 +137,9 @@ fn listen_and_run(user_cmd: String, stop_on_failure: bool, period: f64) -> Resul
                 .arg(&user_cmd)
                 .output()
                 .map_err(|_| Error::CommandFailure(user_cmd.clone()))?;
+
+            // Show the output of the user command
+            println!("{}", String::from_utf8_lossy(&output.stdout));
 
             if !output.status.success() && stop_on_failure {
                 return Err(Error::UserCommand(

@@ -65,7 +65,10 @@ pub(crate) fn git_upstream_info(branch: &str) -> Result<(String, String)> {
     // Parse the URL
     let (username, repo_name) = if url.starts_with("git@") {
         // It's an SSH URL
-        let repo_uri = url.rsplit(':').next().ok_or(Error::GitBadRemote(url.clone()))?;
+        let repo_uri = url
+            .rsplit(':')
+            .next()
+            .ok_or(Error::GitBadRemote(url.clone()))?;
         repo_uri
             .split_once('/')
             .expect("the repo uri to have a slash")
@@ -100,8 +103,9 @@ pub(crate) fn git_has_unstashed_changes() -> Result<bool> {
     Command::new("git")
         .arg("diff")
         .arg("--quiet")
-        .status()
+        .output()
         .map_err(|_| Error::CommandFailure("git diff".to_string()))?
+        .status
         .code()
         .ok_or_else(|| Error::CommandSignaled("git diff".to_string()))
         .map(|c| c != 0)
@@ -112,8 +116,9 @@ pub(crate) fn git_is_work_tree() -> Result<bool> {
     Command::new("git")
         .arg("rev-parse")
         .arg("--is-inside-work-tree")
-        .status()
+        .output()
         .map_err(|_| Error::CommandFailure("git rev-parse --is-inside-work-tree".to_string()))?
+        .status
         .code()
         .ok_or_else(|| Error::CommandSignaled("git rev-parse --is-inside-work-tree".to_string()))
         .map(|c| c == 0)
