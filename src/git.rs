@@ -43,10 +43,9 @@ pub(crate) fn git_upstream_info(branch: &str) -> Result<(String, String)> {
     let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
     trace!("found upstream={}", &upstream);
 
-    // FIXME(alvaro): This fails with branches that have `/` in them
-    let remote = upstream
-        .rsplit('/')
-        .nth(1)
+    // A branch should be in the form of <remote>/<branch>
+    let (remote, _) = upstream
+        .split_once('/')
         .ok_or(Error::GitBadRemote(upstream.clone()))?;
 
     trace!("found upstream remote={}", &remote);
