@@ -15,7 +15,7 @@ pub(crate) enum BrunError {
     GitEmptyHistory,
     #[error("you are not in a git repository (or you are inside the .git directory)")]
     GitNotinWorkTree,
-    #[error("failed to get upstream branch (code={0}): {1}")]
+    #[error("failed to retrieve HEAD branch (code={0}): {1}")]
     GitNoHead(i32, String),
     #[error("failed to get upstream branch (code={0}): {1}")]
     GitNoUpstream(i32, String),
